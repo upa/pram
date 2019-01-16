@@ -108,7 +108,7 @@ static int pram_mem_fault(struct vm_fault *vmf)
 	 * Allocate PAGE_SIZE bytes from p2pmem to each requested page
 	 */
 
-	pa = virt_to_phys(pram->p2pmem + PAGE_SIZE);
+	pa = virt_to_phys(pram->p2pmem + (pagenum << PAGE_SHIFT));
 	pr_info("%s: phyiscal address of mapped p2pmem is %lx\n",
 		__func__, pa);
 	if (pa == 0) {
@@ -258,6 +258,10 @@ static void pram_pci_remove(struct pci_dev *pdev)
 		bar2_dma->phys = 0;
 	}
 
+	/* free p2pmem */
+	pci_free_p2pmem(pdev, pram->p2pmem, DMA_BUF_SIZE);
+
+
 	pci_release_regions(pdev);
 	pci_disable_device(pdev);
 }
@@ -328,9 +332,13 @@ static void __exit pr_release(void)
 {
 	pr_info("pram (v%s) is unloaded\n", PRAM_VERSION);
 
+	pr_info("misc_deregister\n");
 	misc_deregister(&pram_dev);
+
+	pr_info("pci_unregister_driver\n");
 	pci_unregister_driver(&pram_pci_driver);
 
+	pr_info("kfree pram\n");
 	kfree(pram);
 	pram = NULL;
 
