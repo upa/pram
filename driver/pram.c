@@ -10,6 +10,7 @@
 #include <linux/pci.h>
 #include <linux/uaccess.h>
 #include <linux/interrupt.h>
+#include <linux/pci-p2pdma.h>
 
 #define DRV_NAME          "pram"
 #define IFNAMSIZ          16
@@ -38,6 +39,7 @@ struct pram {
 
 struct pram_dev {
 	struct pram dev;
+	void *p2pmem;	/* virtual mem addr of p2p dma mem */
 };
 
 /* Global variables */
@@ -91,6 +93,62 @@ static ssize_t pram_read(struct file *filp, char __user *buf,
 	return sizeof(uint32_t);
 }
 
+static int pram_mem_fault(struct vm_fault *vmf)
+{
+	struct vm_area_struct *vma = vmf->vma;
+	struct page *page;
+	unsigned long off = (vma->vm_pgoff + vmf->pgoff) << PAGE_SHIFT;
+	unsigned long pagenum = off / PAGE_SIZE;
+	unsigned long pa, pfn;
+
+	pr_info("%s: page fault offset %lx, page number %lx\n",
+		__func__, off, pagenum);
+
+	/* XXX:
+	 * Allocate PAGE_SIZE bytes from p2pmem to each requested page
+	 */
+
+	pa = virt_to_phys(pram->p2pmem + PAGE_SIZE);
+	pr_info("%s: phyiscal address of mapped p2pmem is %lx\n",
+		__func__, pa);
+	if (pa == 0) {
+		pr_err("wrong pa\n");
+		return VM_FAULT_SIGBUS;
+	}
+
+	pfn = pa >> PAGE_SHIFT;
+	if (!pfn_valid(pfn)) {
+		pr_err("invalid pfn %lx\n", pfn);
+		return VM_FAULT_SIGBUS;
+	}
+	
+	page = pfn_to_page(pfn);
+	get_page(page);
+	vmf->page = page;
+	pr_info("registered page is %p, map done\n", page);
+
+	return 0;
+}
+
+static struct vm_operations_struct pram_mmap_ops = {
+	.fault = pram_mem_fault,
+};
+
+static int pram_mmap(struct file *filp, struct vm_area_struct *vma)
+{
+	unsigned long off = vma->vm_pgoff << PAGE_SHIFT;
+	unsigned long len = off + (vma->vm_end - vma->vm_start);
+
+	pr_info("%s: offset is %lu, length is %lu\n", __func__, off, len);
+	if (len > DMA_BUF_SIZE) {
+		pr_err("%s: len %lu is larger than PMEM size %d\n",
+		       __func__, len, DMA_BUF_SIZE);
+		return -ENOMEM;
+	}
+	       
+	vma->vm_ops = &pram_mmap_ops;
+	return 0;
+}
 
 static int pram_pci_init(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
@@ -132,12 +190,16 @@ static int pram_pci_init(struct pci_dev *pdev, const struct pci_device_id *ent)
 	bar2->end   = pci_resource_end(pdev, 2);
 	bar2->flags = pci_resource_flags(pdev, 2);
 	bar2->len   = pci_resource_len(pdev, 2);
+
+	/* instead of ioremap, use the p2pdma api
 	bar2->virt  = ioremap(bar2->start, bar2->len);
 	if (!bar2->virt) {
 		pr_err("cannot ioremap MMIO1 base\n");
 		goto error;
 	}
 	pr_info("bar2_virt : %p\n", bar2->virt);
+	*/
+
 	pr_info("bar2_start: %X\n", (uint32_t)bar2->start);
 	pr_info("bar2_end  : %X\n", (uint32_t)bar2->end);
 	pr_info("bar2_flags: %X\n", (uint32_t)bar2->flags);
@@ -151,6 +213,17 @@ static int pram_pci_init(struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 	pr_info("bar2_dma_virt: %p\n", bar2_dma->virt);
 	pr_info("bar2_dma_phys: %X\n", (uint32_t)bar2_dma->phys);
+
+
+	rc = pci_p2pdma_add_resource(pdev, 2, bar2->len, 0);
+	if (rc) {
+		pr_err("failed to register bar2 as p2pdma resource\n");
+		goto error;
+	}
+	pci_p2pmem_publish(pdev, true);
+
+	pram->p2pmem = pci_alloc_p2pmem(pdev, DMA_BUF_SIZE);
+	pr_info("register and allocate p2pmem success, %p\n", pram->p2pmem);
 
 	return 0;
 
@@ -193,6 +266,7 @@ static struct file_operations pram_fops = {
 	.owner        = THIS_MODULE,
 	.read         = pram_read,
 	.write        = pram_write,
+	.mmap	      = pram_mmap,
 //	.poll         = pram_poll,
 //	.compat_ioctl = pram_ioctl,
 	.open         = pram_open,
