@@ -206,7 +206,7 @@ static struct miscdevice pram_dev = {
 };
 
 static const struct pci_device_id pram_pci_tbl[] = {
-	{0x3776, 0x8022, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0 },
+	{0x3776, 0x8011, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0 },
 	{0,}
 };
 MODULE_DEVICE_TABLE(pci, pram_pci_tbl);
