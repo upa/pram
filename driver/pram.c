@@ -97,12 +97,13 @@ static int pram_mem_fault(struct vm_fault *vmf)
 {
 	struct vm_area_struct *vma = vmf->vma;
 	struct page *page;
-	unsigned long off = (vma->vm_pgoff + vmf->pgoff) << PAGE_SHIFT;
-	unsigned long pagenum = off / PAGE_SIZE;
+	unsigned long pagenum = vmf->pgoff;
 	unsigned long pa, pfn;
 
-	pr_info("%s: page fault offset %lx, page number %lx\n",
-		__func__, off, pagenum);
+	pr_info("%s: vma->vm_pgoff=%ld, vmf->pgoff=%ld\n",
+		__func__, vma->vm_pgoff, vmf->pgoff);
+	pr_info("%s: page number %ld\n", __func__, pagenum);
+		
 
 	/* XXX:
 	 * Allocate PAGE_SIZE bytes from p2pmem to each requested page
@@ -137,10 +138,10 @@ static struct vm_operations_struct pram_mmap_ops = {
 static int pram_mmap(struct file *filp, struct vm_area_struct *vma)
 {
 	unsigned long off = vma->vm_pgoff << PAGE_SHIFT;
-	unsigned long len = off + (vma->vm_end - vma->vm_start);
-
+	unsigned long len = vma->vm_end - vma->vm_start;
+	
 	pr_info("%s: offset is %lu, length is %lu\n", __func__, off, len);
-	if (len > DMA_BUF_SIZE) {
+	if (off + len > DMA_BUF_SIZE) {
 		pr_err("%s: len %lu is larger than PMEM size %d\n",
 		       __func__, len, DMA_BUF_SIZE);
 		return -ENOMEM;
@@ -330,17 +331,13 @@ module_init(pr_init);
 
 static void __exit pr_release(void)
 {
-	pr_info("pram (v%s) is unloaded\n", PRAM_VERSION);
-
-	pr_info("misc_deregister\n");
 	misc_deregister(&pram_dev);
-
-	pr_info("pci_unregister_driver\n");
 	pci_unregister_driver(&pram_pci_driver);
 
-	pr_info("kfree pram\n");
 	kfree(pram);
 	pram = NULL;
+
+	pr_info("pram (v%s) is unloaded\n", PRAM_VERSION);
 
 	return;
 }

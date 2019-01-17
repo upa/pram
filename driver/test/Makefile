@@ -4,7 +4,8 @@ INCLUDE :=
 LDFLAGS := 
 CFLAGS := -g -Wall $(INCLUDE)
 
-PROGNAME = pram-mmap-test
+PROGNAME = pram-mmap-test pram-mmap-offset-test	\
+	   mem-bench mem-bench2
 
 all: $(PROGNAME)
 
