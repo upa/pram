@@ -12,6 +12,8 @@
 #include <linux/interrupt.h>
 #include <linux/pci-p2pdma.h>
 
+#include "pram.h"
+
 #define DRV_NAME          "pram"
 #define IFNAMSIZ          16
 #define PRAM_VERSION  "0.0.0"
@@ -110,7 +112,7 @@ static int pram_mem_fault(struct vm_fault *vmf)
 	 */
 
 	pa = virt_to_phys(pram->p2pmem + (pagenum << PAGE_SHIFT));
-	pr_info("%s: phyiscal address of mapped p2pmem is %lx\n",
+	pr_info("%s: paddr of mapped p2pmem is %lx\n",
 		__func__, pa);
 	if (pa == 0) {
 		pr_err("wrong pa\n");
@@ -126,7 +128,6 @@ static int pram_mem_fault(struct vm_fault *vmf)
 	page = pfn_to_page(pfn);
 	get_page(page);
 	vmf->page = page;
-	pr_info("registered page is %p, map done\n", page);
 
 	return 0;
 }
@@ -148,6 +149,37 @@ static int pram_mmap(struct file *filp, struct vm_area_struct *vma)
 	}
 	       
 	vma->vm_ops = &pram_mmap_ops;
+	return 0;
+}
+
+static long pram_ioctl(struct file *filp, unsigned int cmd, unsigned long data)
+{
+	struct pram_addr_info pai;
+
+	switch (cmd) {
+	case PRAMIO_PADDR:
+		if (copy_from_user(&pai, (void *)data, sizeof(pai)) != 0) {
+			pr_err("%s: copy_from_user failed\n", __func__);
+			return -EFAULT;
+		}
+
+		/* XXX:
+		 * How to obtain physical address (on device barX) from
+		 * userland virtual address...?
+		 */
+		pai.paddr = pram->dev.bar2.start + pai.offset;
+
+		if (copy_to_user((void *)data, &pai, sizeof(pai)) != 0) {
+			pr_err("%s: copy_to_user failed\n", __func__);
+			return -EINVAL;
+		}
+		break;
+
+	default:
+		pr_err("invalid pram ioctl cmmand: %d\n", cmd);
+		return -EINVAL;
+	}
+
 	return 0;
 }
 
@@ -268,14 +300,14 @@ static void pram_pci_remove(struct pci_dev *pdev)
 }
 
 static struct file_operations pram_fops = {
-	.owner        = THIS_MODULE,
-	.read         = pram_read,
-	.write        = pram_write,
-	.mmap	      = pram_mmap,
-//	.poll         = pram_poll,
-//	.compat_ioctl = pram_ioctl,
-	.open         = pram_open,
-	.release      = pram_release,
+	.owner       	= THIS_MODULE,
+	.read        	= pram_read,
+	.write       	= pram_write,
+	.mmap	     	= pram_mmap,
+//	.poll        	= pram_poll,
+	.unlocked_ioctl	= pram_ioctl,
+	.open		= pram_open,
+	.release	= pram_release,
 };
 
 static struct miscdevice pram_dev = {
